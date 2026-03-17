@@ -201,8 +201,9 @@ def main():
         from petsc4py import PETSc
 
         viewer = PETSc.Viewer().createASCII(
-            "incompressible_emi.txt", mode=PETSc.Viewer.Mode.WRITE
+            "incompressible_emi.mtx", mode=PETSc.Viewer.Mode.WRITE
         )
+        viewer.pushFormat(PETSc.Viewer.Format.ASCII_MATRIXMARKET)
         viewer.view(problem.A)
         viewer.destroy()
 
