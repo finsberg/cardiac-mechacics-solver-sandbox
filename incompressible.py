@@ -38,7 +38,7 @@ def transverse_holzapfel_ogden(
 
 
 def main():
-    plot_matrix = False  # pip install matlotlib to enable plotting
+    plot_matrix = True  # pip install matlotlib to enable plotting
     save_matrix = True
     save_solution = True
 
@@ -131,6 +131,8 @@ def main():
         "ksp_type": "preonly",
         "pc_type": "lu",
         "pc_factor_mat_solver_type": "superlu_dist",
+        "snes_monitor": None,
+        "ksp_monitor": None,
     }
 
     problem = dolfinx.fem.petsc.NonlinearProblem(
@@ -158,8 +160,8 @@ def main():
     if save_matrix:
         from petsc4py import PETSc
 
-        viewer = PETSc.Viewer().createBinary(
-            "incompressible.dat", mode=PETSc.Viewer.Mode.WRITE
+        viewer = PETSc.Viewer().createASCII(
+            "incompressible.txt", mode=PETSc.Viewer.Mode.WRITE
         )
         viewer.view(problem.A)
         viewer.destroy()

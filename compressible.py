@@ -44,16 +44,15 @@ def main():
 
     logging.basicConfig(level=logging.INFO)
     dolfinx.log.set_log_level(dolfinx.log.LogLevel.INFO)
-    dolfinx.log.set_log_level(dolfinx.log.LogLevel.INFO)
     comm = MPI.COMM_WORLD
-    mesh = dolfinx.mesh.create_unit_cube(comm, 10, 10, 10)
+    mesh = dolfinx.mesh.create_unit_cube(comm, 3, 3, 3)
 
     # Function space for the displacement
-    P2 = dolfinx.fem.functionspace(mesh, ("Lagrange", 1, (3,)))
+    P1 = dolfinx.fem.functionspace(mesh, ("Lagrange", 1, (3,)))
 
     # The displacement
-    u = dolfinx.fem.Function(P2)
-    u_test = ufl.TestFunction(P2)
+    u = dolfinx.fem.Function(P1)
+    u_test = ufl.TestFunction(P1)
 
     # Compute the deformation gradient
     F = ufl.grad(u) + ufl.Identity(3)
@@ -102,9 +101,9 @@ def main():
 
     u_bc = np.array((0,) * mesh.geometry.dim, dtype=dolfinx.default_scalar_type)
     left_dofs = dolfinx.fem.locate_dofs_topological(
-        P2, facet_tag.dim, facet_tag.find(left_marker)
+        P1, facet_tag.dim, facet_tag.find(left_marker)
     )
-    bcs = [dolfinx.fem.dirichletbc(u_bc, left_dofs, P2)]
+    bcs = [dolfinx.fem.dirichletbc(u_bc, left_dofs, P1)]
 
     ds = ufl.ds(domain=mesh, subdomain_data=facet_tag)
 
@@ -115,12 +114,14 @@ def main():
     Ru += ufl.inner(u_test, n) * ds(right_marker)
 
     R = Ru
-    K = ufl.derivative(Ru, u, ufl.TrialFunction(P2))
+    K = ufl.derivative(Ru, u, ufl.TrialFunction(P1))
 
     petsc_options = {
         "ksp_type": "preonly",
         "pc_type": "lu",
         "pc_factor_mat_solver_type": "superlu_dist",
+        "snes_monitor": None,
+        "ksp_monitor": None,
     }
 
     problem = dolfinx.fem.petsc.NonlinearProblem(
@@ -149,8 +150,8 @@ def main():
     if save_matrix:
         from petsc4py import PETSc
 
-        viewer = PETSc.Viewer().createBinary(
-            "compressible.dat", mode=PETSc.Viewer.Mode.WRITE
+        viewer = PETSc.Viewer().createASCII(
+            "compressible.txt", mode=PETSc.Viewer.Mode.WRITE
         )
         viewer.view(problem.A)
         viewer.destroy()
