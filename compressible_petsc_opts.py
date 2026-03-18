@@ -1,6 +1,7 @@
 import time
 import numpy as np
 from mpi4py import MPI
+from petsc4py import PETSc
 import dolfinx
 import dolfinx.fem.petsc
 import ufl
@@ -118,10 +119,28 @@ def run_simulation(
         J=K,
         u=u,
         bcs=bcs,
-        petsc_options_prefix="nls",
+        petsc_options_prefix="nls_",
         petsc_options=petsc_options,
     )
 
+    if petsc_options["pc_type"] == "bddc":
+        # 2. Create the unassembled MATIS matrix required by BDDC
+        # Note: problem.a is the compiled bilinear form of the Jacobian
+        J_form = dolfinx.fem.form(K)
+        A_is = dolfinx.fem.petsc.create_matrix(J_form, kind=PETSc.Mat.Type.IS)
+
+        # 3. Define a custom Python callback to assemble the MATIS matrix at every Newton step
+        def compute_jacobian(snes, x, J, P):
+            J.zeroEntries()
+            dolfinx.fem.petsc.assemble_matrix(J, J_form, bcs=bcs)
+            J.assemble()
+
+        # 4. Retrieve the SNES solver and swap both the matrix AND the callback
+        snes = problem.solver
+        snes.setJacobian(compute_jacobian, J=A_is, P=A_is)
+
+        # Apply options so PETSc registers the MATIS matrix before setup
+        snes.setFromOptions()
     t0 = time.perf_counter()
     problem.solve()
     t1 = time.perf_counter()
@@ -131,7 +150,7 @@ def run_simulation(
 def main():
     # logging.basicConfig(level=logging.INFO)
     # dolfinx.log.set_log_level(dolfinx.log.LogLevel.INFO)
-    for N in [3, 5, 10]:
+    for N in [10]:
         print(f"Running simulation with N={N} subdivisions per side...")
 
         petsc_options = {
@@ -153,6 +172,39 @@ def main():
         }
         print("Running with GAMG preconditioner and CG solver...")
         run_simulation(petsc_options, N=N)
+
+        petsc_options = {
+            "ksp_type": "gmres",  # The paper uses GMRES for the Newton-Krylov solver [cite: 1690]
+            "pc_type": "bddc",  # Balancing Domain Decomposition by Constraints
+            # Use MUMPS for the local Dirichlet and Neumann problems (proven fastest in the paper) [cite: 1953, 1960]
+            "pc_bddc_dirichlet_pc_type": "lu",
+            "pc_bddc_dirichlet_pc_factor_mat_solver_type": "mumps",
+            "pc_bddc_neumann_pc_type": "lu",
+            "pc_bddc_neumann_pc_factor_mat_solver_type": "mumps",
+            # Use MUMPS for the Coarse problem [cite: 1969]
+            "pc_bddc_coarse_pc_type": "lu",
+            "pc_bddc_coarse_pc_factor_mat_solver_type": "mumps",
+            # Primal space tuning (The paper tests V, VE, EF, and VEF. VEF gives the lowest iterations) [cite: 2055, 2060]
+            "pc_bddc_use_vertices": "true",
+            "pc_bddc_use_edges": "true",
+            "pc_bddc_use_faces": "true",
+            # Enable near-null space (rigid body modes) [cite: 1871]
+            "pc_bddc_use_nnsp": "true",
+        }
+        print("Running with BDDC preconditioner and GMRES solver...")
+        run_simulation(petsc_options, N=N)
+
+        petsc_options_amg = {
+            "ksp_type": "gmres",  # [cite: 1690]
+            "pc_type": "hypre",  #
+            "pc_hypre_type": "boomeramg",  #
+            # Strong thresholding is usually required for elasticity
+            "pc_hypre_boomeramg_strong_threshold": 0.5,
+            "pc_hypre_boomeramg_coarsen_type": "HMIS",
+            "pc_hypre_boomeramg_interp_type": "ext+i",
+        }
+        print("Running with Hypre BoomerAMG preconditioner and GMRES solver...")
+        run_simulation(petsc_options_amg, N=N)
 
 
 if __name__ == "__main__":
